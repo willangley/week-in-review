@@ -30,5 +30,10 @@ You can then do what you want with it; I normally right-click the Week in Review
 folder in the main view, click **Copy as TaskPaper**, and then paste my tasks
 into an editor. I edit for clarity and send them to stakeholders.
 
+## Disclaimer
+
+This is not actively supported by Google; it is just code that happens to be
+owned by Google.
+
 [omnifocus]: https://www.omnigroup.com/omnifocus/
 [plug-in]: https://omni-automation.com/actions/action-01.html
