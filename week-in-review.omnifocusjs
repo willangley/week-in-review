@@ -1,0 +1,149 @@
+/*{
+    "type": "action",
+    "targets": ["omnifocus"],
+    "author": "Will Angley",
+    "identifier": "org.willangley.week-in-review",
+    "version": "1.0",
+    "description": "Generate a report of what you've accomplished over the past week.",
+    "label": "Week in Review",
+    "shortLabel": "Week in Review"
+}*/
+(() => {
+    function makeReviewFolder(startDate) {
+        const week = new DateComponents();
+        week.day = 7;
+        const endDate = Calendar.current.dateByAddingDateComponents(
+            startDate, week);
+        console.log("searching between:", startDate, endDate);
+
+        // Start by listing the folders we're copying _before_ we make a new
+        // folder, to avoid copying it to itself.
+        const FOLDER_PREFIX = "Week in Review: starting";
+        const originalSections = library.slice().filter(
+            section => !section.name.startsWith(FOLDER_PREFIX));
+
+        const formatter = Formatter.Date.withStyle(
+            Formatter.Date.Style.Medium)
+        const reviewFolder = new Folder(
+            `${FOLDER_PREFIX} ${formatter.stringFromDate(startDate)}`,
+            library.ending)
+
+        duplicateSections(originalSections, reviewFolder);
+
+        // Now, working within the copy, iterate over projects, and search
+        // for tasks that were completed during the timeframe.
+        //
+        // If _no_ tasks were completed during the timeframe, queue the
+        // project for deletion and continue.
+        //
+        // If tasks were completed, filter the project to include only tasks
+        // which were completed, or the parent of a task completed during
+        // the timeframe. Queue all other tasks for deletion, too.
+        const objectsToDelete = [];
+
+        for (const project of reviewFolder.flattenedProjects) {
+            const tasksIdsToKeep = new Set();
+            const completedTasks = project.flattenedTasks.filter(
+                task => task.completionDate >= startDate &&
+                task.completionDate < endDate);
+
+            console.log("project", project, "completed tasks:",
+                completedTasks);
+
+            if (!completedTasks.length) {
+                objectsToDelete.push(project);
+                continue;
+            }
+
+            for (const task of completedTasks) {
+                tasksIdsToKeep.add(task.id.primaryKey);
+                let parent = task.parent;
+                while (parent) {
+                    tasksIdsToKeep.add(parent.id.primaryKey);
+                    parent = parent.parent;
+                }
+            }
+            console.log("tasksIdsToKeep", [...tasksIdsToKeep]);
+
+            project.task.apply(task => {
+                if (!tasksIdsToKeep.has(task.id.primaryKey)) {
+                    objectsToDelete.push(task);
+                    return ApplyResult.SkipChildren;
+                }
+            });
+        }
+
+        // Delete objects that were queued for deletion
+        for (const obj of objectsToDelete) {
+            deleteObject(obj);
+        }
+
+        // Clean up folders that have become empty, too. This is an O(n^2)
+        // hack, to avoid needing to implement mark-sweep on folders ;)
+        let folderDeleted;
+        do {
+            folderDeleted = false;
+            for (const folder of reviewFolder.flattenedFolders) {
+                if (!folder.flattenedSections.length) {
+                    deleteObject(folder);
+                    folderDeleted = true;
+                    break;
+                }
+            }
+        } while (folderDeleted);
+
+        return reviewFolder;
+    }
+
+    const action = new PlugIn.Action(function(selection, sender){
+        // Week in Review runs over all past tasks.
+        
+        // Create form for gathering user input
+        const inputForm = new Form();
+        
+        // Create date input
+        const dateField = new Form.Field.Date(
+            "startDateInput",
+            "Week starting",
+            null
+        );
+        
+        // Add the fields to the form
+        inputForm.addField(dateField);
+    
+        // Present the form to the user
+        const formPrompt = "Generate weekly review";
+        const formPromise = inputForm.show(formPrompt, "Continue");
+        
+        // Validate the user input
+        inputForm.validate = function(formObject){
+            const startDate = formObject.values["startDateInput"];
+            const startDateInPast = (startDate && startDate < new Date());
+            return startDateInPast;
+        }
+    
+        // Processing using the data extracted from the form
+        formPromise.then(function(formObject){
+            const startDate = formObject.values["startDateInput"];
+            const reviewFolder = makeReviewFolder(startDate);
+            const winPromise = document.newWindow()
+            winPromise.then(win => {
+                win.focus = [reviewFolder];
+                win.perspective =
+                    Perspective.Custom.byName("Completed by Project");
+            });
+
+            winPromise.catch(err => {
+                console.error(err.message);
+            });
+        });
+        
+        // Promise function called upon form cancellation
+        formPromise.catch(function(err){
+            console.log("form cancelled", err.message);
+        });
+    });
+    
+    return action;
+})();
+
